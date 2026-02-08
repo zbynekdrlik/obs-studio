@@ -1171,7 +1171,34 @@ void *obs_graphics_thread(void *param)
 
 	const uint64_t interval = obs->video.video_frame_interval_ns;
 
+#ifdef _WIN32
+	/* PTP-aligned render tick: align initial video_time to the next
+	   UTC frame boundary so that the render phase is deterministic
+	   across OBS restarts on PTP-synchronized systems. */
+	{
+		FILETIME ft;
+		GetSystemTimePreciseAsFileTime(&ft);
+		uint64_t utc_ns = ((uint64_t)ft.dwHighDateTime << 32 |
+				   ft.dwLowDateTime) * 100;
+		uint64_t qpc_now = os_gettime_ns();
+
+		uint64_t next_boundary = ((utc_ns / interval) + 1) * interval;
+		uint64_t sleep_ns = next_boundary - utc_ns;
+		uint64_t target_qpc = qpc_now + sleep_ns;
+
+		os_sleepto_ns(target_qpc);
+		obs->video.video_time = target_qpc;
+
+		blog(LOG_INFO,
+		     "PTP render-tick aligned: utc=%llu ns, "
+		     "sleep=%llu ns, video_time=%llu ns",
+		     (unsigned long long)utc_ns,
+		     (unsigned long long)sleep_ns,
+		     (unsigned long long)target_qpc);
+	}
+#else
 	obs->video.video_time = os_gettime_ns();
+#endif
 
 	os_set_thread_name("libobs: graphics thread");
 
