@@ -905,6 +905,7 @@ struct obs_source {
 	bool async_linear_alpha;
 	bool async_active;
 	bool async_update_texture;
+	uint64_t async_frame_ts; /* Frame identity tracking: timestamp of current async frame */
 	bool async_unbuffered;
 	bool async_decoupled;
 	struct obs_source_frame *async_preload_frame;

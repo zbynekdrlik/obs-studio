@@ -1348,8 +1348,11 @@ static void async_tick(obs_source_t *source)
 		filter_frame(source, &source->prev_async_frame);
 	filter_frame(source, &source->cur_async_frame);
 
-	if (source->cur_async_frame)
+	if (source->cur_async_frame) {
 		source->async_update_texture = set_async_texture_size(source, source->cur_async_frame);
+		/* Frame identity tracking: store timestamp before frame is released */
+		source->async_frame_ts = source->cur_async_frame->timestamp;
+	}
 
 	pthread_mutex_unlock(&source->async_mutex);
 }
@@ -2646,13 +2649,10 @@ static inline void obs_source_render_async_video(obs_source_t *source)
 
 		/* Frame identity tracking: set the source frame timestamp
 		 * so it can be correlated with the final output time */
-		if (source->cur_async_frame) {
-			gs_set_last_drawn_frame_ts(source->cur_async_frame->timestamp);
+		if (source->async_frame_ts) {
+			gs_set_last_drawn_frame_ts(source->async_frame_ts);
 			blog(LOG_DEBUG, "[frame_identity] set frame_ts=%" PRIu64 " for source '%s'",
-			     source->cur_async_frame->timestamp, source->context.name);
-		} else {
-			blog(LOG_DEBUG, "[frame_identity] cur_async_frame is NULL for source '%s'",
-			     source->context.name);
+			     source->async_frame_ts, source->context.name);
 		}
 
 		obs_source_draw_texture(source, effect);
