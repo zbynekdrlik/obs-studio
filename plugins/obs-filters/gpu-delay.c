@@ -65,6 +65,7 @@ static void update_interval(struct gpu_delay_filter_data *f, uint64_t new_interv
 		for (size_t i = prev_num; i < num; i++) {
 			struct frame *frame = deque_data(&f->frames, i * sizeof(*frame));
 			frame->render = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+			frame->ts = 0; /* Initialize frame identity timestamp */
 		}
 
 		obs_leave_graphics();
@@ -235,6 +236,10 @@ static void draw_frame(struct gpu_delay_filter_data *f)
 	struct frame frame;
 	deque_peek_front(&f->frames, &frame, sizeof(frame));
 
+	/* Frame identity tracking: propagate the stored frame timestamp
+	 * so downstream code knows which source frame is being output */
+	gs_set_last_drawn_frame_ts(frame.ts);
+
 	const enum gs_color_space current_space = gs_get_color_space();
 	float multiplier;
 	const char *technique = get_tech_name_and_multiplier(current_space, frame.space, &multiplier);
@@ -306,6 +311,10 @@ static void gpu_delay_filter_render(void *data, gs_effect_t *effect)
 			obs_source_default_render(target);
 		else
 			obs_source_video_render(target);
+
+		/* Frame identity tracking: capture the source frame timestamp
+		 * after rendering so we can propagate it when outputting */
+		frame.ts = gs_get_last_drawn_frame_ts();
 
 		gs_texrender_end(frame.render);
 
