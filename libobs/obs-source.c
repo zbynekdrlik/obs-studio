@@ -2644,6 +2644,11 @@ static inline void obs_source_render_async_video(obs_source_t *source)
 			gs_blend_function(GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
 		}
 
+		/* Frame identity tracking: set the source frame timestamp
+		 * so it can be correlated with the final output time */
+		if (source->cur_async_frame)
+			gs_set_last_drawn_frame_ts(source->cur_async_frame->timestamp);
+
 		obs_source_draw_texture(source, effect);
 
 		if (nonlinear_alpha) {

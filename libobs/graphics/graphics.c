@@ -2908,6 +2908,22 @@ void gs_debug_marker_end(void)
 	thread_graphics->exports.device_debug_marker_end(thread_graphics->device);
 }
 
+void gs_set_last_drawn_frame_ts(uint64_t frame_ts)
+{
+	if (!gs_valid("gs_set_last_drawn_frame_ts"))
+		return;
+
+	thread_graphics->last_drawn_frame_ts = frame_ts;
+}
+
+uint64_t gs_get_last_drawn_frame_ts(void)
+{
+	if (!gs_valid("gs_get_last_drawn_frame_ts"))
+		return 0;
+
+	return thread_graphics->last_drawn_frame_ts;
+}
+
 bool gs_texture_create_nv12(gs_texture_t **tex_y, gs_texture_t **tex_uv, uint32_t width, uint32_t height,
 			    uint32_t flags)
 {

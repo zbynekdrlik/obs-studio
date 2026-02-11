@@ -1112,7 +1112,7 @@ static const char *obs_signals[] = {
 	"void canvas_rename(ptr canvas, string new_name, string prev_name)",
 
 	"void video_reset()",
-	"void frame_output(int output_wall_clock_ns, int frame_ts)",
+	"void frame_output(int output_wall_clock_ns, int source_frame_ts)",
 
 	NULL,
 };

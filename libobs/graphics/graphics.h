@@ -455,6 +455,14 @@ EXPORT void gs_texrender_reset(gs_texrender_t *texrender);
 EXPORT gs_texture_t *gs_texrender_get_texture(const gs_texrender_t *texrender);
 EXPORT enum gs_color_format gs_texrender_get_format(const gs_texrender_t *texrender);
 
+/* Frame identity tracking - associate a source frame timestamp with a texrender */
+EXPORT void gs_texrender_set_frame_ts(gs_texrender_t *texrender, uint64_t frame_ts);
+EXPORT uint64_t gs_texrender_get_frame_ts(const gs_texrender_t *texrender);
+
+/* Frame identity tracking - track the last drawn frame timestamp in the graphics context */
+EXPORT void gs_set_last_drawn_frame_ts(uint64_t frame_ts);
+EXPORT uint64_t gs_get_last_drawn_frame_ts(void);
+
 /* ---------------------------------------------------
  * graphics subsystem
  * --------------------------------------------------- */

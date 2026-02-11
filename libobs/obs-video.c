@@ -777,7 +777,8 @@ static inline void copy_rgbx_frame(struct video_frame *output, const struct vide
 	}
 }
 
-static inline void output_video_data(struct obs_core_video_mix *video, struct video_data *input_frame, int count)
+static inline void output_video_data(struct obs_core_video_mix *video, struct video_data *input_frame, int count,
+				     uint64_t source_frame_ts)
 {
 	const struct video_output_info *info;
 	struct video_frame output_frame;
@@ -795,10 +796,12 @@ static inline void output_video_data(struct obs_core_video_mix *video, struct vi
 
 		video_output_unlock_frame(video->video);
 
-		/* Emit frame_output signal at pipeline end */
+		/* Emit frame_output signal at pipeline end
+		 * source_frame_ts is the original frame timestamp from the source,
+		 * tracked through the graphics pipeline for frame identity correlation */
 		struct calldata cd = {0};
 		calldata_set_int(&cd, "output_wall_clock_ns", (int64_t)os_gettime_ns());
-		calldata_set_int(&cd, "frame_ts", (int64_t)input_frame->timestamp);
+		calldata_set_int(&cd, "source_frame_ts", (int64_t)source_frame_ts);
 		signal_handler_signal(obs_get_signal_handler(), "frame_output", &cd);
 		calldata_free(&cd);
 	}
@@ -906,6 +909,9 @@ static inline void output_frame(struct obs_core_video_mix *video)
 	gs_flush();
 	profile_end(output_frame_gs_flush_name);
 
+	/* Capture source frame timestamp while still in graphics context */
+	uint64_t source_frame_ts = gs_get_last_drawn_frame_ts();
+
 	gs_leave_context();
 	profile_end(output_frame_gs_context_name);
 
@@ -915,7 +921,7 @@ static inline void output_frame(struct obs_core_video_mix *video)
 
 		frame.timestamp = vframe_info.timestamp;
 		profile_start(output_frame_output_video_data_name);
-		output_video_data(video, &frame, vframe_info.count);
+		output_video_data(video, &frame, vframe_info.count, source_frame_ts);
 		profile_end(output_frame_output_video_data_name);
 	}
 

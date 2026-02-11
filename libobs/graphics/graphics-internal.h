@@ -332,4 +332,7 @@ struct graphics_subsystem {
 	DARRAY(struct blend_state) blend_state_stack;
 
 	bool linear_srgb;
+
+	/* Frame identity tracking - timestamp of the last frame drawn to screen */
+	uint64_t last_drawn_frame_ts;
 };
