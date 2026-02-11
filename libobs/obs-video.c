@@ -794,6 +794,13 @@ static inline void output_video_data(struct obs_core_video_mix *video, struct vi
 		}
 
 		video_output_unlock_frame(video->video);
+
+		/* Emit frame_output signal at pipeline end */
+		struct calldata cd = {0};
+		calldata_set_int(&cd, "output_wall_clock_ns", (int64_t)os_gettime_ns());
+		calldata_set_int(&cd, "frame_ts", (int64_t)input_frame->timestamp);
+		signal_handler_signal(obs_get_signal_handler(), "frame_output", &cd);
+		calldata_free(&cd);
 	}
 }
 
@@ -888,17 +895,6 @@ static inline void output_frame(struct obs_core_video_mix *video)
 	render_video(video, raw_active, gpu_active, cur_texture);
 	GS_DEBUG_MARKER_END();
 	profile_end(output_frame_render_video_name);
-
-	/* Emit render_complete signal with wall-clock time for timing analysis */
-	if (video->vframe_info_buffer.size >= sizeof(struct obs_vframe_info)) {
-		struct obs_vframe_info vframe_peek;
-		deque_peek_front(&video->vframe_info_buffer, &vframe_peek, sizeof(vframe_peek));
-		struct calldata cd = {0};
-		calldata_set_int(&cd, "render_wall_clock_ns", (int64_t)os_gettime_ns());
-		calldata_set_int(&cd, "frame_ts", (int64_t)vframe_peek.timestamp);
-		signal_handler_signal(obs_get_signal_handler(), "render_complete", &cd);
-		calldata_free(&cd);
-	}
 
 	if (raw_active) {
 		profile_start(output_frame_download_frame_name);
