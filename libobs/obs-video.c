@@ -911,6 +911,11 @@ static inline void output_frame(struct obs_core_video_mix *video)
 
 	/* Capture source frame timestamp while still in graphics context */
 	uint64_t source_frame_ts = gs_get_last_drawn_frame_ts();
+	static uint64_t last_debug_ts = 0;
+	if (os_gettime_ns() - last_debug_ts > 1000000000ULL) {
+		blog(LOG_DEBUG, "[frame_identity] captured source_frame_ts=%" PRIu64, source_frame_ts);
+		last_debug_ts = os_gettime_ns();
+	}
 
 	gs_leave_context();
 	profile_end(output_frame_gs_context_name);
