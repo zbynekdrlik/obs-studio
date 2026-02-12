@@ -1544,6 +1544,11 @@ EXPORT void obs_source_get_audio_mix(const obs_source_t *source, struct obs_sour
 EXPORT void obs_source_set_async_unbuffered(obs_source_t *source, bool unbuffered);
 EXPORT bool obs_source_async_unbuffered(const obs_source_t *source);
 
+/** Use wall-clock (NTP) time for async frame selection instead of monotonic time.
+ * Enable this for sources with wall-clock timestamps (e.g., NDI timecodes). */
+EXPORT void obs_source_set_async_wall_clock(obs_source_t *source, bool enabled);
+EXPORT bool obs_source_get_async_wall_clock(const obs_source_t *source);
+
 /** Used to decouple audio from video so that audio doesn't attempt to sync up
  * with video.  I.E. Audio acts independently.  Only works when in unbuffered
  * mode. */

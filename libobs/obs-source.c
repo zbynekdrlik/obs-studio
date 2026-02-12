@@ -18,6 +18,12 @@
 #include <inttypes.h>
 #include <math.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
 #include "media-io/format-conversion.h"
 #include "media-io/video-frame.h"
 #include "media-io/audio-io.h"
@@ -32,6 +38,23 @@
 #include "obs-internal.h"
 
 #define get_weak(source) ((obs_weak_source_t *)source->context.control)
+
+/* Get wall-clock (NTP) time in nanoseconds since Unix epoch.
+ * Used for sources with wall-clock timestamps (e.g., NDI timecodes). */
+static inline int64_t get_wall_clock_ns(void)
+{
+#ifdef _WIN32
+	FILETIME ft;
+	GetSystemTimePreciseAsFileTime(&ft);
+	uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+	/* Convert from 100ns intervals since 1601 to ns since Unix epoch */
+	return (int64_t)((t - 116444736000000000ULL) * 100);
+#else
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+#endif
+}
 
 static bool filter_compatible(obs_source_t *source, obs_source_t *filter);
 
@@ -1327,7 +1350,14 @@ void process_media_actions(obs_source_t *source)
 
 static void async_tick(obs_source_t *source)
 {
-	uint64_t sys_time = obs->video.video_time;
+	uint64_t sys_time;
+
+	/* Use wall-clock time for sources with wall-clock timestamps */
+	if (source->async_wall_clock) {
+		sys_time = (uint64_t)get_wall_clock_ns();
+	} else {
+		sys_time = obs->video.video_time;
+	}
 
 	pthread_mutex_lock(&source->async_mutex);
 
@@ -5615,6 +5645,19 @@ void obs_source_set_async_unbuffered(obs_source_t *source, bool unbuffered)
 bool obs_source_async_unbuffered(const obs_source_t *source)
 {
 	return obs_source_valid(source, "obs_source_async_unbuffered") ? source->async_unbuffered : false;
+}
+
+void obs_source_set_async_wall_clock(obs_source_t *source, bool enabled)
+{
+	if (!obs_source_valid(source, "obs_source_set_async_wall_clock"))
+		return;
+
+	source->async_wall_clock = enabled;
+}
+
+bool obs_source_get_async_wall_clock(const obs_source_t *source)
+{
+	return obs_source_valid(source, "obs_source_get_async_wall_clock") ? source->async_wall_clock : false;
 }
 
 obs_data_t *obs_source_get_private_settings(obs_source_t *source)
