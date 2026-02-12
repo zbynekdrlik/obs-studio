@@ -1284,6 +1284,7 @@ void obs_source_deactivate(obs_source_t *source, enum view_type type)
 }
 
 static inline struct obs_source_frame *get_closest_frame(obs_source_t *source, uint64_t sys_time);
+static struct obs_source_frame *get_scheduled_frame(obs_source_t *source, uint64_t wall_time);
 
 static void filter_frame(obs_source_t *source, struct obs_source_frame **ref_frame)
 {
@@ -1352,8 +1353,8 @@ static void async_tick(obs_source_t *source)
 {
 	uint64_t sys_time;
 
-	/* Use wall-clock time for sources with wall-clock timestamps */
-	if (source->async_wall_clock) {
+	/* Use wall-clock time for sources with wall-clock or scheduled timestamps */
+	if (source->async_wall_clock || source->async_scheduled) {
 		sys_time = (uint64_t)get_wall_clock_ns();
 	} else {
 		sys_time = obs->video.video_time;
@@ -1361,7 +1362,20 @@ static void async_tick(obs_source_t *source)
 
 	pthread_mutex_lock(&source->async_mutex);
 
-	if (deinterlacing_enabled(source)) {
+	if (source->async_scheduled) {
+		/*
+		 * Scheduled mode: simple wall-clock comparison for frame selection.
+		 * No adaptive algorithms, no internal state accumulation.
+		 * Frame renders exactly when wall_clock >= frame.timestamp.
+		 */
+		struct obs_source_frame *new_frame = get_scheduled_frame(source, sys_time);
+		if (new_frame) {
+			if (source->cur_async_frame)
+				remove_async_frame(source, source->cur_async_frame);
+			source->cur_async_frame = new_frame;
+		}
+		/* else: keep displaying cur_async_frame (previous frame) */
+	} else if (deinterlacing_enabled(source)) {
 		deinterlace_process_last_frame(source, sys_time);
 	} else {
 		if (source->cur_async_frame) {
@@ -4211,6 +4225,29 @@ static bool ready_async_frame(obs_source_t *source, uint64_t sys_time)
 	return frame != NULL;
 }
 
+/*
+ * Scheduled playback mode: frame is displayed when wall_clock >= frame.timestamp.
+ * This provides deterministic timing with no adaptive algorithms or internal state.
+ * Used for sources with NTP-synchronized timestamps (e.g., NDI timecodes).
+ */
+static struct obs_source_frame *get_scheduled_frame(obs_source_t *source, uint64_t wall_time)
+{
+	if (!source->async_frames.num)
+		return NULL;
+
+	struct obs_source_frame *frame = source->async_frames.array[0];
+
+	/* Simple decision: is it time to show this frame? */
+	if (wall_time >= frame->timestamp) {
+		da_erase(source->async_frames, 0);
+		source->last_frame_ts = frame->timestamp;
+		return frame;
+	}
+
+	/* Not yet time - keep showing previous frame */
+	return NULL;
+}
+
 static inline struct obs_source_frame *get_closest_frame(obs_source_t *source, uint64_t sys_time)
 {
 	if (!source->async_frames.num)
@@ -5658,6 +5695,19 @@ void obs_source_set_async_wall_clock(obs_source_t *source, bool enabled)
 bool obs_source_get_async_wall_clock(const obs_source_t *source)
 {
 	return obs_source_valid(source, "obs_source_get_async_wall_clock") ? source->async_wall_clock : false;
+}
+
+void obs_source_set_async_scheduled(obs_source_t *source, bool enabled)
+{
+	if (!obs_source_valid(source, "obs_source_set_async_scheduled"))
+		return;
+
+	source->async_scheduled = enabled;
+}
+
+bool obs_source_get_async_scheduled(const obs_source_t *source)
+{
+	return obs_source_valid(source, "obs_source_get_async_scheduled") ? source->async_scheduled : false;
 }
 
 obs_data_t *obs_source_get_private_settings(obs_source_t *source)

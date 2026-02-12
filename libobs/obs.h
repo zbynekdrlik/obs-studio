@@ -1549,6 +1549,13 @@ EXPORT bool obs_source_async_unbuffered(const obs_source_t *source);
 EXPORT void obs_source_set_async_wall_clock(obs_source_t *source, bool enabled);
 EXPORT bool obs_source_get_async_wall_clock(const obs_source_t *source);
 
+/** Scheduled playback mode: frame renders exactly when wall_clock >= timestamp.
+ * This provides deterministic timing with no adaptive algorithms - the frame
+ * selection is a simple comparison. Used for NTP-synchronized timestamps.
+ * When enabled, also enables wall-clock time internally. */
+EXPORT void obs_source_set_async_scheduled(obs_source_t *source, bool enabled);
+EXPORT bool obs_source_get_async_scheduled(const obs_source_t *source);
+
 /** Used to decouple audio from video so that audio doesn't attempt to sync up
  * with video.  I.E. Audio acts independently.  Only works when in unbuffered
  * mode. */

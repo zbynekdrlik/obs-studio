@@ -908,6 +908,7 @@ struct obs_source {
 	uint64_t async_frame_ts; /* Frame identity tracking: timestamp of current async frame */
 	bool async_unbuffered;
 	bool async_wall_clock; /* Use wall-clock time for frame selection */
+	bool async_scheduled;  /* Render frame exactly when wall_clock >= timestamp */
 	bool async_decoupled;
 	struct obs_source_frame *async_preload_frame;
 	DARRAY(struct async_frame) async_cache;
