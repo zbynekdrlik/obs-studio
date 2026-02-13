@@ -1,0 +1,81 @@
+name: Dev CI/CD
+run-name: dev deploy ${{ github.sha }}
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-project:
+    name: Build Project
+    uses: ./.github/workflows/build-project.yaml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  deploy:
+    name: Deploy to stream.lan
+    needs: build-project
+    runs-on: [self-hosted, linux, deployer]
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "obs-studio-windows-x64-*"
+          merge-multiple: false
+
+      - name: Stop OBS
+        run: |
+          ssh stream.lan 'taskkill /IM obs64.exe /F' 2>/dev/null || true
+          sleep 3
+
+      - name: Deploy OBS Studio
+        run: |
+          ARTIFACT_DIR=$(ls -d obs-studio-windows-x64-*/ 2>/dev/null | head -1)
+          if [ -z "$ARTIFACT_DIR" ]; then
+            echo "FAIL: No artifact directory found"
+            ls -la
+            exit 1
+          fi
+          echo "Using artifact directory: $ARTIFACT_DIR"
+
+          cd "$ARTIFACT_DIR"
+          ZIP_FILE=$(ls *.zip 2>/dev/null | head -1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "FAIL: No ZIP file found in $ARTIFACT_DIR"
+            ls -la
+            exit 1
+          fi
+          echo "Deploying: $ZIP_FILE"
+
+          # Transfer ZIP to target
+          scp "$ZIP_FILE" 'stream.lan:C:\Temp\obs-update.zip'
+
+          # Extract over existing installation
+          ssh stream.lan 'powershell -Command "Expand-Archive -Path \"C:\Temp\obs-update.zip\" -DestinationPath \"C:\Program Files\obs-studio\" -Force"'
+
+          # Clean up temp file
+          ssh stream.lan 'del "C:\Temp\obs-update.zip"'
+
+          echo "Deployment complete"
+
+      - name: Start OBS
+        run: |
+          ssh stream.lan 'schtasks /Run /TN "StartOBS"'
+          echo "Waiting 15s for OBS startup..."
+          sleep 15
+
+      - name: Verify deployment
+        run: |
+          echo "=== Checking OBS process ==="
+          ssh stream.lan 'tasklist /FI "IMAGENAME eq obs64.exe"' | grep -q obs64.exe \
+            || { echo "FAIL: OBS not running"; exit 1; }
+          echo "OBS is running"
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf obs-studio-windows-x64-*/
