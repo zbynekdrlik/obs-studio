@@ -4230,29 +4230,39 @@ static bool ready_async_frame(obs_source_t *source, uint64_t sys_time)
  * This provides deterministic timing with no adaptive algorithms or internal state.
  * Used for sources with NTP-synchronized timestamps (e.g., NDI timecodes).
  *
- * Look-ahead compensation: frames are selected early to account for GPU pipeline
- * latency. The frame is selected when wall_clock + look_ahead_ns >= timestamp,
- * so it will be ready to present at the intended wall-clock time.
+ * Drains all past-due frames per tick to prevent backup cascading when frames
+ * arrive in bursts or after a stall. Returns the latest frame whose scheduled
+ * time has passed, releasing any stale intermediate frames.
  */
 static struct obs_source_frame *get_scheduled_frame(obs_source_t *source, uint64_t wall_time)
 {
 	if (!source->async_frames.num)
 		return NULL;
 
-	struct obs_source_frame *frame = source->async_frames.array[0];
+	struct obs_source_frame *best = NULL;
 
-	/* Look-ahead: select frame early to compensate for GPU pipeline latency */
-	uint64_t effective_time = wall_time + (uint64_t)source->scheduled_look_ahead_ns;
+	/* Drain all frames whose scheduled time has passed.
+	 * This prevents backup cascading when frames arrive in bursts
+	 * or after the buffer catches up from a stall. */
+	while (source->async_frames.num) {
+		struct obs_source_frame *frame = source->async_frames.array[0];
 
-	/* Simple decision: is it time to show this frame (with look-ahead)? */
-	if (effective_time >= frame->timestamp) {
-		da_erase(source->async_frames, 0);
-		source->last_frame_ts = frame->timestamp;
-		return frame;
+		if (wall_time >= frame->timestamp) {
+			/* Release previous candidate (it's now stale) */
+			if (best)
+				remove_async_frame(source, best);
+
+			da_erase(source->async_frames, 0);
+			best = frame;
+		} else {
+			break;
+		}
 	}
 
-	/* Not yet time - keep showing previous frame */
-	return NULL;
+	if (best)
+		source->last_frame_ts = best->timestamp;
+
+	return best;
 }
 
 static inline struct obs_source_frame *get_closest_frame(obs_source_t *source, uint64_t sys_time)
