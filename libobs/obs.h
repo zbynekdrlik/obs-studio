@@ -1556,6 +1556,14 @@ EXPORT bool obs_source_get_async_wall_clock(const obs_source_t *source);
 EXPORT void obs_source_set_async_scheduled(obs_source_t *source, bool enabled);
 EXPORT bool obs_source_get_async_scheduled(const obs_source_t *source);
 
+/** Set look-ahead time for scheduled frame selection.
+ * Frames are selected when wall_clock + look_ahead_ns >= timestamp.
+ * This compensates for GPU pipeline latency (typically 1-2 vsync intervals).
+ * Only effective when scheduled mode is enabled.
+ * @param look_ahead_ns Nanoseconds to look ahead (e.g., 16666666 for 1 vsync) */
+EXPORT void obs_source_set_scheduled_look_ahead_ns(obs_source_t *source, int64_t look_ahead_ns);
+EXPORT int64_t obs_source_get_scheduled_look_ahead_ns(const obs_source_t *source);
+
 /** Used to decouple audio from video so that audio doesn't attempt to sync up
  * with video.  I.E. Audio acts independently.  Only works when in unbuffered
  * mode. */

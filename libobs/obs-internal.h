@@ -909,6 +909,7 @@ struct obs_source {
 	bool async_unbuffered;
 	bool async_wall_clock; /* Use wall-clock time for frame selection */
 	bool async_scheduled;  /* Render frame exactly when wall_clock >= timestamp */
+	int64_t scheduled_look_ahead_ns; /* How early to select frames in scheduled mode (GPU pipeline compensation) */
 	bool async_decoupled;
 	struct obs_source_frame *async_preload_frame;
 	DARRAY(struct async_frame) async_cache;

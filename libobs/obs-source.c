@@ -4229,6 +4229,10 @@ static bool ready_async_frame(obs_source_t *source, uint64_t sys_time)
  * Scheduled playback mode: frame is displayed when wall_clock >= frame.timestamp.
  * This provides deterministic timing with no adaptive algorithms or internal state.
  * Used for sources with NTP-synchronized timestamps (e.g., NDI timecodes).
+ *
+ * Look-ahead compensation: frames are selected early to account for GPU pipeline
+ * latency. The frame is selected when wall_clock + look_ahead_ns >= timestamp,
+ * so it will be ready to present at the intended wall-clock time.
  */
 static struct obs_source_frame *get_scheduled_frame(obs_source_t *source, uint64_t wall_time)
 {
@@ -4237,8 +4241,11 @@ static struct obs_source_frame *get_scheduled_frame(obs_source_t *source, uint64
 
 	struct obs_source_frame *frame = source->async_frames.array[0];
 
-	/* Simple decision: is it time to show this frame? */
-	if (wall_time >= frame->timestamp) {
+	/* Look-ahead: select frame early to compensate for GPU pipeline latency */
+	uint64_t effective_time = wall_time + (uint64_t)source->scheduled_look_ahead_ns;
+
+	/* Simple decision: is it time to show this frame (with look-ahead)? */
+	if (effective_time >= frame->timestamp) {
 		da_erase(source->async_frames, 0);
 		source->last_frame_ts = frame->timestamp;
 		return frame;
@@ -5708,6 +5715,19 @@ void obs_source_set_async_scheduled(obs_source_t *source, bool enabled)
 bool obs_source_get_async_scheduled(const obs_source_t *source)
 {
 	return obs_source_valid(source, "obs_source_get_async_scheduled") ? source->async_scheduled : false;
+}
+
+void obs_source_set_scheduled_look_ahead_ns(obs_source_t *source, int64_t look_ahead_ns)
+{
+	if (!obs_source_valid(source, "obs_source_set_scheduled_look_ahead_ns"))
+		return;
+
+	source->scheduled_look_ahead_ns = look_ahead_ns;
+}
+
+int64_t obs_source_get_scheduled_look_ahead_ns(const obs_source_t *source)
+{
+	return obs_source_valid(source, "obs_source_get_scheduled_look_ahead_ns") ? source->scheduled_look_ahead_ns : 0;
 }
 
 obs_data_t *obs_source_get_private_settings(obs_source_t *source)
