@@ -836,19 +836,30 @@ static inline void video_sleep(struct obs_core_video *video, uint64_t *p_time, u
 {
 	struct obs_vframe_info vframe_info;
 	uint64_t cur_time = *p_time;
-	uint64_t t = cur_time + interval_ns;
 	int count;
 
-	if (os_sleepto_ns(t)) {
-		*p_time = t;
+	/* Phase-lock to wall-clock-aligned frame boundaries.
+	 * Compute NEXT wall-clock boundary, translate to monotonic sleep target.
+	 * Wall-to-mono offset drift is ~0.08us per frame (2.4ppm * 33ms) -
+	 * negligible within a single frame. */
+	int64_t wall_now = get_wall_clock_ns();
+	int64_t period = (int64_t)interval_ns;
+	int64_t next_boundary = ((wall_now / period) + 1) * period;
+	int64_t sleep_duration_ns = next_boundary - wall_now;
+
+	uint64_t mono_now = os_gettime_ns();
+	uint64_t mono_target = mono_now + (uint64_t)sleep_duration_ns;
+
+	if (os_sleepto_ns(mono_target)) {
+		*p_time = os_gettime_ns();
 		count = 1;
 	} else {
-		const uint64_t udiff = os_gettime_ns() - cur_time;
-		int64_t diff;
-		memcpy(&diff, &udiff, sizeof(diff));
-		const uint64_t clamped_diff = (diff > (int64_t)interval_ns) ? (uint64_t)diff : interval_ns;
-		count = (int)(clamped_diff / interval_ns);
-		*p_time = cur_time + interval_ns * count;
+		int64_t wall_actual = get_wall_clock_ns();
+		int64_t overshoot = wall_actual - next_boundary;
+		if (overshoot < 0)
+			overshoot = 0;
+		count = 1 + (int)(overshoot / period);
+		*p_time = os_gettime_ns();
 	}
 
 	video->total_frames += count;
