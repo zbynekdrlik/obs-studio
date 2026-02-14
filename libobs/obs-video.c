@@ -838,13 +838,21 @@ static inline void video_sleep(struct obs_core_video *video, uint64_t *p_time, u
 	uint64_t cur_time = *p_time;
 	int count;
 
-	/* Phase-lock to wall-clock-aligned frame boundaries.
-	 * Compute NEXT wall-clock boundary, translate to monotonic sleep target.
+	/* Phase-lock to second-aligned frame boundaries.
+	 * Boundaries are relative to each second start (.000, .033, .066, ...)
+	 * to match camera genlock grid. Translate to monotonic sleep target.
 	 * Wall-to-mono offset drift is ~0.08us per frame (2.4ppm * 33ms) -
 	 * negligible within a single frame. */
 	int64_t wall_now = get_wall_clock_ns();
 	int64_t period = (int64_t)interval_ns;
-	int64_t next_boundary = ((wall_now / period) + 1) * period;
+	int64_t second_ns = 1000000000LL;
+	int64_t second_start = (wall_now / second_ns) * second_ns;
+	int64_t offset_in_second = wall_now - second_start;
+	int64_t current_boundary = second_start + (offset_in_second / period) * period;
+	int64_t next_boundary = current_boundary + period;
+	/* Wrap to next second if boundary crosses second edge */
+	if (next_boundary >= second_start + second_ns)
+		next_boundary = second_start + second_ns;
 	int64_t sleep_duration_ns = next_boundary - wall_now;
 
 	uint64_t mono_now = os_gettime_ns();

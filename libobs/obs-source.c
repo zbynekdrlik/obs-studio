@@ -135,6 +135,7 @@ static const char *source_signals[] = {
 	"void media_previous(ptr source)",
 	"void media_started(ptr source)",
 	"void media_ended(ptr source)",
+	"void frame_tick(int tick_wall_clock_ns, int frame_ts)",
 	NULL,
 };
 
@@ -1399,6 +1400,16 @@ static void async_tick(obs_source_t *source)
 	}
 
 	pthread_mutex_unlock(&source->async_mutex);
+
+	/* Emit frame_tick signal outside mutex for timing instrumentation.
+	 * Carries wall-clock time when frame was selected and frame identity. */
+	if (source->cur_async_frame) {
+		struct calldata cd = {0};
+		calldata_set_int(&cd, "tick_wall_clock_ns", (int64_t)get_wall_clock_ns());
+		calldata_set_int(&cd, "frame_ts", (int64_t)source->async_frame_ts);
+		signal_handler_signal(obs_source_get_signal_handler(source), "frame_tick", &cd);
+		calldata_free(&cd);
+	}
 }
 
 void obs_source_video_tick(obs_source_t *source, float seconds)
