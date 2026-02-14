@@ -30,6 +30,23 @@
 #include <windows.h>
 #endif
 
+/* Get wall-clock (NTP) time in nanoseconds since Unix epoch.
+ * Used for frame_output signal to provide real wall-clock render times. */
+static inline int64_t get_wall_clock_ns(void)
+{
+#ifdef _WIN32
+	FILETIME ft;
+	GetSystemTimePreciseAsFileTime(&ft);
+	uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+	/* Convert from 100ns intervals since 1601 to ns since Unix epoch */
+	return (int64_t)((t - 116444736000000000ULL) * 100);
+#else
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+#endif
+}
+
 static uint64_t tick_sources(uint64_t cur_time, uint64_t last_time)
 {
 	struct obs_core_data *data = &obs->data;
@@ -800,7 +817,7 @@ static inline void output_video_data(struct obs_core_video_mix *video, struct vi
 		 * source_frame_ts is the original frame timestamp from the source,
 		 * tracked through the graphics pipeline for frame identity correlation */
 		struct calldata cd = {0};
-		calldata_set_int(&cd, "output_wall_clock_ns", (int64_t)os_gettime_ns());
+		calldata_set_int(&cd, "output_wall_clock_ns", (int64_t)get_wall_clock_ns());
 		calldata_set_int(&cd, "source_frame_ts", (int64_t)source_frame_ts);
 		signal_handler_signal(obs_get_signal_handler(), "frame_output", &cd);
 		calldata_free(&cd);
@@ -819,19 +836,30 @@ static inline void video_sleep(struct obs_core_video *video, uint64_t *p_time, u
 {
 	struct obs_vframe_info vframe_info;
 	uint64_t cur_time = *p_time;
-	uint64_t t = cur_time + interval_ns;
 	int count;
 
-	if (os_sleepto_ns(t)) {
-		*p_time = t;
+	/* Phase-lock to wall-clock-aligned frame boundaries.
+	 * Compute NEXT wall-clock boundary, translate to monotonic sleep target.
+	 * Wall-to-mono offset drift is ~0.08us per frame (2.4ppm * 33ms) -
+	 * negligible within a single frame. */
+	int64_t wall_now = get_wall_clock_ns();
+	int64_t period = (int64_t)interval_ns;
+	int64_t next_boundary = ((wall_now / period) + 1) * period;
+	int64_t sleep_duration_ns = next_boundary - wall_now;
+
+	uint64_t mono_now = os_gettime_ns();
+	uint64_t mono_target = mono_now + (uint64_t)sleep_duration_ns;
+
+	if (os_sleepto_ns(mono_target)) {
+		*p_time = os_gettime_ns();
 		count = 1;
 	} else {
-		const uint64_t udiff = os_gettime_ns() - cur_time;
-		int64_t diff;
-		memcpy(&diff, &udiff, sizeof(diff));
-		const uint64_t clamped_diff = (diff > (int64_t)interval_ns) ? (uint64_t)diff : interval_ns;
-		count = (int)(clamped_diff / interval_ns);
-		*p_time = cur_time + interval_ns * count;
+		int64_t wall_actual = get_wall_clock_ns();
+		int64_t overshoot = wall_actual - next_boundary;
+		if (overshoot < 0)
+			overshoot = 0;
+		count = 1 + (int)(overshoot / period);
+		*p_time = os_gettime_ns();
 	}
 
 	video->total_frames += count;
