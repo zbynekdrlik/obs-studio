@@ -848,8 +848,7 @@ static inline void video_sleep(struct obs_core_video *video, uint64_t *p_time, u
 	int64_t second_ns = 1000000000LL;
 	int64_t second_start = (wall_now / second_ns) * second_ns;
 	int64_t offset_in_second = wall_now - second_start;
-	int64_t current_boundary = second_start +
-				   (offset_in_second / period) * period;
+	int64_t current_boundary = second_start + (offset_in_second / period) * period;
 	int64_t next_boundary = current_boundary + period;
 	/* Wrap to next second if boundary crosses second edge */
 	if (next_boundary >= second_start + second_ns)
