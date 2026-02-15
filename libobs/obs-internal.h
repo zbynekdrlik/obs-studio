@@ -887,6 +887,11 @@ struct obs_source {
 	/* audio_is_duplicated: tracks whether a source appears multiple times in the audio tree during this tick */
 	bool audio_is_duplicated;
 
+	/* Audio buffer drift monitoring */
+	uint32_t audio_drift_log_counter;
+	int64_t audio_drift_buf_samples_sum;
+	uint32_t audio_drift_buf_sample_count;
+
 	/* async video data */
 	gs_texture_t *async_textures[MAX_AV_PLANES];
 	gs_texrender_t *async_texrender;

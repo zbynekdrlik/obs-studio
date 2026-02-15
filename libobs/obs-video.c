@@ -838,11 +838,11 @@ static inline void video_sleep(struct obs_core_video *video, uint64_t *p_time, u
 	uint64_t cur_time = *p_time;
 	int count;
 
-	/* Phase-lock to second-aligned frame boundaries.
-	 * Boundaries are relative to each second start (.000, .033, .066, ...)
-	 * to match camera genlock grid. Translate to monotonic sleep target.
-	 * Wall-to-mono offset drift is ~0.08us per frame (2.4ppm * 33ms) -
-	 * negligible within a single frame. */
+	/* Phase-lock to second-aligned frame boundaries for genlock.
+	 * Boundaries: .000, .033, .066, ... within each wall-clock second
+	 * to match camera genlock grid. After sleeping, count and video_time
+	 * are advanced using the original synthetic method to maintain
+	 * correct frame counting for the encoder pipeline. */
 	int64_t wall_now = get_wall_clock_ns();
 	int64_t period = (int64_t)interval_ns;
 	int64_t second_ns = 1000000000LL;
@@ -858,17 +858,18 @@ static inline void video_sleep(struct obs_core_video *video, uint64_t *p_time, u
 	uint64_t mono_now = os_gettime_ns();
 	uint64_t mono_target = mono_now + (uint64_t)sleep_duration_ns;
 
-	if (os_sleepto_ns(mono_target)) {
-		*p_time = os_gettime_ns();
-		count = 1;
-	} else {
-		int64_t wall_actual = get_wall_clock_ns();
-		int64_t overshoot = wall_actual - next_boundary;
-		if (overshoot < 0)
-			overshoot = 0;
-		count = 1 + (int)(overshoot / period);
-		*p_time = os_gettime_ns();
-	}
+	/* Sleep to genlock-aligned boundary */
+	os_sleepto_ns(mono_target);
+
+	/* Count elapsed intervals and advance video_time synthetically
+	 * (same logic as upstream OBS). This ensures the encoder receives
+	 * the correct frame count for A/V sync in streaming outputs. */
+	const uint64_t udiff = os_gettime_ns() - cur_time;
+	int64_t diff;
+	memcpy(&diff, &udiff, sizeof(diff));
+	const uint64_t clamped_diff = (diff > (int64_t)interval_ns) ? (uint64_t)diff : interval_ns;
+	count = (int)(clamped_diff / interval_ns);
+	*p_time = cur_time + interval_ns * count;
 
 	video->total_frames += count;
 	video->lagged_frames += count - 1;

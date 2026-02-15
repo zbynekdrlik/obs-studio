@@ -10,16 +10,72 @@ permissions:
   actions: read
 
 jobs:
-  build-project:
-    name: Build Project
-    uses: ./.github/workflows/build-project.yaml
-    secrets: inherit
-    permissions:
-      contents: read
+  check-event:
+    name: Event Data 🔎
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      package: ${{ steps.setup.outputs.package }}
+      config: ${{ steps.setup.outputs.config }}
+      commitHash: ${{ steps.setup.outputs.commitHash }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Event Data ☑️
+        id: setup
+        run: |
+          echo "package=true" >> $GITHUB_OUTPUT
+          echo "config=RelWithDebInfo" >> $GITHUB_OUTPUT
+          echo "commitHash=${GITHUB_SHA:0:9}" >> $GITHUB_OUTPUT
+
+  windows-build:
+    name: Windows 🪟 (x64)
+    runs-on: windows-2022
+    needs: check-event
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build OBS Studio 🧱
+        uses: ./.github/actions/build-obs
+        env:
+          TWITCH_CLIENTID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_HASH: ${{ secrets.TWITCH_HASH }}
+          RESTREAM_CLIENTID: ${{ secrets.RESTREAM_CLIENTID }}
+          RESTREAM_HASH: ${{ secrets.RESTREAM_HASH }}
+          YOUTUBE_CLIENTID: ${{ secrets.YOUTUBE_CLIENTID }}
+          YOUTUBE_CLIENTID_HASH: ${{ secrets.YOUTUBE_CLIENTID_HASH }}
+          YOUTUBE_SECRET: ${{ secrets.YOUTUBE_SECRET }}
+          YOUTUBE_SECRET_HASH: ${{ secrets.YOUTUBE_SECRET_HASH }}
+          GPU_PRIORITY_VAL: ${{ secrets.GPU_PRIORITY_VAL }}
+        with:
+          target: x64
+          config: ${{ needs.check-event.outputs.config }}
+
+      - name: Package OBS Studio 📀
+        uses: ./.github/actions/package-obs
+        with:
+          target: x64
+          config: ${{ needs.check-event.outputs.config }}
+          package: ${{ fromJSON(needs.check-event.outputs.package) }}
+
+      - name: Upload Artifacts 📡
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-studio-windows-x64-${{ needs.check-event.outputs.commitHash }}
+          path: ${{ github.workspace }}/build_x64/obs-studio-*-windows-x64.zip
 
   deploy:
     name: Deploy to stream.lan
-    needs: build-project
+    needs: windows-build
     runs-on: [self-hosted, linux, deployer]
     steps:
       - name: Download build artifact

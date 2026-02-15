@@ -310,6 +310,28 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 
 	source->pending_stop = false;
 	source->audio_ts = ts->end;
+
+	/* Log buffer fill level every ~10 seconds for drift monitoring */
+	source->audio_drift_log_counter++;
+	if (source->audio_drift_log_counter >= 47) {
+		int64_t fill = (int64_t)(source->audio_input_buf[0].size /
+					 sizeof(float));
+		source->audio_drift_buf_samples_sum += fill;
+		source->audio_drift_buf_sample_count++;
+
+		if (source->audio_drift_buf_sample_count >= 10) {
+			int64_t avg_fill =
+				source->audio_drift_buf_samples_sum /
+				source->audio_drift_buf_sample_count;
+			blog(LOG_DEBUG,
+			     "[audio-drift] source '%s' avg_buf=%lld samples",
+			     obs_source_get_name(source),
+			     (long long)avg_fill);
+			source->audio_drift_buf_samples_sum = 0;
+			source->audio_drift_buf_sample_count = 0;
+		}
+		source->audio_drift_log_counter = 0;
+	}
 }
 
 static inline bool audio_buffering_maxed(struct obs_core_audio *audio)
