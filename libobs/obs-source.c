@@ -1525,6 +1525,9 @@ static void reset_audio_data(obs_source_t *source, uint64_t os_time)
 	source->last_audio_input_buf_size = 0;
 	source->audio_ts = os_time;
 	source->next_audio_sys_ts_min = os_time;
+	source->audio_drift_log_counter = 0;
+	source->audio_drift_buf_samples_sum = 0;
+	source->audio_drift_buf_sample_count = 0;
 }
 
 static void handle_ts_jump(obs_source_t *source, uint64_t expected, uint64_t ts, uint64_t diff, uint64_t os_time)
