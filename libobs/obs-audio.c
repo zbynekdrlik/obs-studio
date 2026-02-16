@@ -351,10 +351,6 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 			blog(LOG_DEBUG, "can't discard, data still pending");
 #endif
 		source->audio_ts = ts->end;
-
-		/* Run PLL measurement even on underrun so EMA tracks
-		 * the low buffer level and can react on the next tick */
-		audio_pll_measure(source);
 		return;
 	}
 
