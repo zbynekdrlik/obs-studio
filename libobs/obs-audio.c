@@ -324,7 +324,27 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 	/* Software audio genlock: apply ±1 sample correction */
 	if (source->audio_pll_locked) {
 		double error = source->audio_pll_ema_fill - source->audio_pll_target_fill;
+
+		/* Anti-windup: clamp error to ±100 samples to prevent
+		 * disproportionate correction rates from transient buffer
+		 * shifts. Real clock drift produces steady-state error of
+		 * ~50 samples at 50ppm, so ±100 gives 2x headroom while
+		 * limiting corrections to at most ~1 per 10 ticks during
+		 * large transients (vs 1 per tick unclamped). */
+		if (error > 100.0)
+			error = 100.0;
+		else if (error < -100.0)
+			error = -100.0;
+
 		source->audio_pll_correction_accum += 0.001 * error;
+
+		/* Also clamp accumulator as safety net for edge cases
+		 * where corrections can't be applied (total_floats at
+		 * boundary) and the accumulator would grow unbounded. */
+		if (source->audio_pll_correction_accum > 2.0)
+			source->audio_pll_correction_accum = 2.0;
+		else if (source->audio_pll_correction_accum < -2.0)
+			source->audio_pll_correction_accum = -2.0;
 
 		if (source->audio_pll_correction_accum >= 1.0 && total_floats < AUDIO_OUTPUT_FRAMES + 1) {
 			total_floats += 1;
