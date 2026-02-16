@@ -284,6 +284,25 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 		total_floats -= start_point;
 	}
 
+	/* Software audio genlock: apply ±1 sample correction */
+	if (source->audio_pll_locked) {
+		double error = source->audio_pll_ema_fill -
+			       source->audio_pll_target_fill;
+		source->audio_pll_correction_accum += 0.001 * error;
+
+		if (source->audio_pll_correction_accum >= 1.0 &&
+		    total_floats < AUDIO_OUTPUT_FRAMES + 1) {
+			total_floats += 1;
+			source->audio_pll_correction_accum -= 1.0;
+			source->audio_pll_total_dropped++;
+		} else if (source->audio_pll_correction_accum <= -1.0 &&
+			   total_floats > 1) {
+			total_floats -= 1;
+			source->audio_pll_correction_accum += 1.0;
+			source->audio_pll_total_added++;
+		}
+	}
+
 	size = total_floats * sizeof(float);
 
 	if (source->audio_input_buf[0].size < size) {
@@ -311,26 +330,50 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 	source->pending_stop = false;
 	source->audio_ts = ts->end;
 
-	/* Log buffer fill level every ~10 seconds for drift monitoring */
-	source->audio_drift_log_counter++;
-	if (source->audio_drift_log_counter >= 47) {
-		int64_t fill = (int64_t)(source->audio_input_buf[0].size /
-					 sizeof(float));
-		source->audio_drift_buf_samples_sum += fill;
-		source->audio_drift_buf_sample_count++;
+	/* Software audio genlock PLL: measure and log */
+	{
+		double buf_fill = (double)(source->audio_input_buf[0].size /
+					   sizeof(float));
 
-		if (source->audio_drift_buf_sample_count >= 10) {
-			int64_t avg_fill =
-				source->audio_drift_buf_samples_sum /
-				source->audio_drift_buf_sample_count;
-			blog(LOG_DEBUG,
-			     "[audio-drift] source '%s' avg_buf=%lld samples",
+		if (source->audio_pll_warmup_ticks == 0)
+			source->audio_pll_ema_fill = buf_fill;
+		else
+			source->audio_pll_ema_fill +=
+				(buf_fill - source->audio_pll_ema_fill) /
+				128.0;
+
+		source->audio_pll_warmup_ticks++;
+
+		if (!source->audio_pll_locked &&
+		    source->audio_pll_warmup_ticks >= 938) {
+			source->audio_pll_target_fill =
+				source->audio_pll_ema_fill;
+			source->audio_pll_locked = true;
+			blog(LOG_INFO,
+			     "[audio-pll] source '%s' locked, "
+			     "target_fill=%.1f samples",
 			     obs_source_get_name(source),
-			     (long long)avg_fill);
-			source->audio_drift_buf_samples_sum = 0;
-			source->audio_drift_buf_sample_count = 0;
+			     source->audio_pll_target_fill);
 		}
-		source->audio_drift_log_counter = 0;
+
+		source->audio_pll_log_counter++;
+		if (source->audio_pll_log_counter >= 469) {
+			double error = source->audio_pll_ema_fill -
+				       source->audio_pll_target_fill;
+			blog(LOG_DEBUG,
+			     "[audio-pll] source '%s' fill=%.0f ema=%.1f "
+			     "target=%.1f err=%.1f accum=%.3f "
+			     "+%" PRId64 "/-%" PRId64 " %s",
+			     obs_source_get_name(source), buf_fill,
+			     source->audio_pll_ema_fill,
+			     source->audio_pll_target_fill, error,
+			     source->audio_pll_correction_accum,
+			     source->audio_pll_total_added,
+			     source->audio_pll_total_dropped,
+			     source->audio_pll_locked ? "LOCKED"
+						      : "WARMUP");
+			source->audio_pll_log_counter = 0;
+		}
 	}
 }
 
