@@ -227,6 +227,27 @@ static inline void audio_pll_measure(obs_source_t *source)
 {
 	double buf_fill = (double)(source->audio_input_buf[0].size / sizeof(float));
 
+	/* Discontinuity detection: if buffer level jumped by more than
+	 * 2048 samples (~42ms at 48kHz), this is a discrete event (OBS
+	 * audio reset, network glitch, ignore_audio), NOT clock drift.
+	 * Snap EMA/target to the new level and reset accumulator instead
+	 * of letting the EMA slowly track toward it (which would drive
+	 * unwanted corrections during the ~128-tick recovery). */
+	if (source->audio_pll_locked) {
+		double delta = buf_fill - source->audio_pll_ema_fill;
+		if (delta > 2048.0 || delta < -2048.0) {
+			blog(LOG_INFO,
+			     "[audio-pll] source '%s' discontinuity: "
+			     "buf=%.0f ema=%.1f delta=%.0f, fast relock",
+			     obs_source_get_name(source), buf_fill,
+			     source->audio_pll_ema_fill, delta);
+			source->audio_pll_ema_fill = buf_fill;
+			source->audio_pll_target_fill = buf_fill;
+			source->audio_pll_correction_accum = 0.0;
+			return;
+		}
+	}
+
 	if (source->audio_pll_warmup_ticks == 0)
 		source->audio_pll_ema_fill = buf_fill;
 	else
