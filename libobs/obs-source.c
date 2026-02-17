@@ -1525,14 +1525,6 @@ static void reset_audio_data(obs_source_t *source, uint64_t os_time)
 	source->last_audio_input_buf_size = 0;
 	source->audio_ts = os_time;
 	source->next_audio_sys_ts_min = os_time;
-	source->audio_pll_ema_fill = 0.0;
-	source->audio_pll_target_fill = 0.0;
-	source->audio_pll_correction_accum = 0.0;
-	source->audio_pll_warmup_ticks = 0;
-	source->audio_pll_log_counter = 0;
-	source->audio_pll_total_added = 0;
-	source->audio_pll_total_dropped = 0;
-	source->audio_pll_locked = false;
 }
 
 static void handle_ts_jump(obs_source_t *source, uint64_t expected, uint64_t ts, uint64_t diff, uint64_t os_time)

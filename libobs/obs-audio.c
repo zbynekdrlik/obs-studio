@@ -220,66 +220,6 @@ static bool discard_if_stopped(obs_source_t *source, size_t channels)
 
 #define MAX_AUDIO_SIZE (AUDIO_OUTPUT_FRAMES * sizeof(float))
 
-/* Software audio genlock PLL: update EMA, warmup, lock detection, logging.
- * Called on every discard_audio tick — both normal and underrun paths —
- * so the PLL always sees the true buffer level. */
-static inline void audio_pll_measure(obs_source_t *source)
-{
-	double buf_fill = (double)(source->audio_input_buf[0].size / sizeof(float));
-
-	/* Discontinuity detection: if buffer level jumped by more than
-	 * 2048 samples (~42ms at 48kHz), this is a discrete event (OBS
-	 * audio reset, network glitch, ignore_audio), NOT clock drift.
-	 * Snap EMA to the new level so it doesn't slowly track toward it
-	 * (which would drive unwanted corrections during ~128-tick recovery).
-	 * Keep target_fill at the original locked value so the PLL will
-	 * naturally drain/fill the buffer back to the correct operating
-	 * point via its normal error → accumulator → correction path. */
-	if (source->audio_pll_locked) {
-		double delta = buf_fill - source->audio_pll_ema_fill;
-		if (delta > 2048.0 || delta < -2048.0) {
-			blog(LOG_INFO,
-			     "[audio-pll] source '%s' discontinuity: "
-			     "buf=%.0f ema=%.1f target=%.1f delta=%.0f, "
-			     "snap ema (keeping target)",
-			     obs_source_get_name(source), buf_fill, source->audio_pll_ema_fill,
-			     source->audio_pll_target_fill, delta);
-			source->audio_pll_ema_fill = buf_fill;
-			source->audio_pll_correction_accum = 0.0;
-			return;
-		}
-	}
-
-	if (source->audio_pll_warmup_ticks == 0)
-		source->audio_pll_ema_fill = buf_fill;
-	else
-		source->audio_pll_ema_fill += (buf_fill - source->audio_pll_ema_fill) / 128.0;
-
-	source->audio_pll_warmup_ticks++;
-
-	if (!source->audio_pll_locked && source->audio_pll_warmup_ticks >= 938) {
-		source->audio_pll_target_fill = source->audio_pll_ema_fill;
-		source->audio_pll_locked = true;
-		blog(LOG_INFO,
-		     "[audio-pll] source '%s' locked, "
-		     "target_fill=%.1f samples",
-		     obs_source_get_name(source), source->audio_pll_target_fill);
-	}
-
-	source->audio_pll_log_counter++;
-	if (source->audio_pll_log_counter >= 469) {
-		double error = source->audio_pll_ema_fill - source->audio_pll_target_fill;
-		blog(LOG_DEBUG,
-		     "[audio-pll] source '%s' fill=%.0f ema=%.1f "
-		     "target=%.1f err=%.1f accum=%.3f "
-		     "+%" PRId64 "/-%" PRId64 " %s",
-		     obs_source_get_name(source), buf_fill, source->audio_pll_ema_fill, source->audio_pll_target_fill,
-		     error, source->audio_pll_correction_accum, source->audio_pll_total_added,
-		     source->audio_pll_total_dropped, source->audio_pll_locked ? "LOCKED" : "WARMUP");
-		source->audio_pll_log_counter = 0;
-	}
-}
-
 static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *source, size_t channels,
 				 size_t sample_rate, struct ts_info *ts)
 {
@@ -344,50 +284,11 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 		total_floats -= start_point;
 	}
 
-	/* Software audio genlock: apply ±1 sample correction */
-	if (source->audio_pll_locked) {
-		double error = source->audio_pll_ema_fill - source->audio_pll_target_fill;
-
-		/* Anti-windup: clamp error to ±100 samples to prevent
-		 * disproportionate correction rates from transient buffer
-		 * shifts. Real clock drift produces steady-state error of
-		 * ~50 samples at 50ppm, so ±100 gives 2x headroom while
-		 * limiting corrections to at most ~1 per 10 ticks during
-		 * large transients (vs 1 per tick unclamped). */
-		if (error > 100.0)
-			error = 100.0;
-		else if (error < -100.0)
-			error = -100.0;
-
-		source->audio_pll_correction_accum += 0.001 * error;
-
-		/* Also clamp accumulator as safety net for edge cases
-		 * where corrections can't be applied (total_floats at
-		 * boundary) and the accumulator would grow unbounded. */
-		if (source->audio_pll_correction_accum > 2.0)
-			source->audio_pll_correction_accum = 2.0;
-		else if (source->audio_pll_correction_accum < -2.0)
-			source->audio_pll_correction_accum = -2.0;
-
-		if (source->audio_pll_correction_accum >= 1.0 && total_floats < AUDIO_OUTPUT_FRAMES + 1) {
-			total_floats += 1;
-			source->audio_pll_correction_accum -= 1.0;
-			source->audio_pll_total_dropped++;
-		} else if (source->audio_pll_correction_accum <= -1.0 && total_floats > 1) {
-			total_floats -= 1;
-			source->audio_pll_correction_accum += 1.0;
-			source->audio_pll_total_added++;
-		}
-	}
-
 	size = total_floats * sizeof(float);
 
 	if (source->audio_input_buf[0].size < size) {
 		if (discard_if_stopped(source, channels))
 			return;
-
-		blog(LOG_DEBUG, "[audio-pll] source '%s' underrun: buf=%zu need=%zu", obs_source_get_name(source),
-		     source->audio_input_buf[0].size / sizeof(float), total_floats);
 
 #if DEBUG_AUDIO == 1
 		if (is_audio_source)
@@ -409,9 +310,6 @@ static inline void discard_audio(struct obs_core_audio *audio, obs_source_t *sou
 
 	source->pending_stop = false;
 	source->audio_ts = ts->end;
-
-	/* Software audio genlock PLL: measure and log */
-	audio_pll_measure(source);
 }
 
 static inline bool audio_buffering_maxed(struct obs_core_audio *audio)
