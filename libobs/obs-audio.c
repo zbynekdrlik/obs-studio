@@ -242,8 +242,7 @@ static inline void audio_pll_measure(obs_source_t *source)
 			     "[audio-pll] source '%s' discontinuity: "
 			     "buf=%.0f ema=%.1f target=%.1f delta=%.0f, "
 			     "snap ema (keeping target)",
-			     obs_source_get_name(source), buf_fill,
-			     source->audio_pll_ema_fill,
+			     obs_source_get_name(source), buf_fill, source->audio_pll_ema_fill,
 			     source->audio_pll_target_fill, delta);
 			source->audio_pll_ema_fill = buf_fill;
 			source->audio_pll_correction_accum = 0.0;
