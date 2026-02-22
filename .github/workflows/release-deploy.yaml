@@ -1,5 +1,5 @@
 name: Release Deploy
-run-name: release deploy ${{ github.event.release.tag_name }} to resolume.lan
+run-name: release deploy ${{ github.event.release.tag_name }}
 
 on:
   release:
@@ -10,8 +10,12 @@ permissions:
 
 jobs:
   deploy:
-    name: Deploy to resolume.lan
+    name: Deploy to ${{ matrix.host }}
     runs-on: [self-hosted, linux, deployer]
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [stream.lan, strih.lan, resolume.lan]
     steps:
       - name: Download release artifact
         run: |
@@ -24,7 +28,7 @@ jobs:
 
       - name: Stop OBS
         run: |
-          ssh resolume.lan 'taskkill /IM obs64.exe /F' 2>/dev/null || true
+          ssh ${{ matrix.host }} 'taskkill /IM obs64.exe /F' 2>/dev/null || true
           sleep 3
 
       - name: Deploy OBS Studio
@@ -37,21 +41,21 @@ jobs:
             exit 1
           fi
           echo "Deploying: $ZIP_FILE"
-          scp "$ZIP_FILE" 'resolume.lan:C:\Temp\obs-update.zip'
-          ssh resolume.lan 'powershell -Command "Expand-Archive -Path \"C:\Temp\obs-update.zip\" -DestinationPath \"C:\Program Files\obs-studio\" -Force"'
-          ssh resolume.lan 'del "C:\Temp\obs-update.zip"'
+          scp "$ZIP_FILE" '${{ matrix.host }}:C:\Temp\obs-update.zip'
+          ssh ${{ matrix.host }} 'powershell -Command "Expand-Archive -Path \"C:\Temp\obs-update.zip\" -DestinationPath \"C:\Program Files\obs-studio\" -Force"'
+          ssh ${{ matrix.host }} 'del "C:\Temp\obs-update.zip"'
 
       - name: Start OBS
         run: |
-          ssh resolume.lan 'schtasks /Run /TN "StartOBS"'
+          ssh ${{ matrix.host }} 'schtasks /Run /TN "StartOBS"'
           echo "Waiting 15s for OBS startup..."
           sleep 15
 
       - name: Verify deployment
         run: |
-          ssh resolume.lan 'tasklist /FI "IMAGENAME eq obs64.exe"' | grep -q obs64.exe \
-            || { echo "FAIL: OBS not running"; exit 1; }
-          echo "OBS is running"
+          ssh ${{ matrix.host }} 'tasklist /FI "IMAGENAME eq obs64.exe"' | grep -q obs64.exe \
+            || { echo "FAIL: OBS not running on ${{ matrix.host }}"; exit 1; }
+          echo "OBS is running on ${{ matrix.host }}"
 
       - name: Cleanup
         if: always()
