@@ -1,0 +1,57 @@
+name: Release Deploy
+run-name: release deploy ${{ github.event.release.tag_name }} to resolume.lan
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to resolume.lan
+    runs-on: [self-hosted, linux, deployer]
+    steps:
+      - name: Download release artifact
+        run: |
+          gh release download "${{ github.event.release.tag_name }}" \
+            --pattern "OBS-Studio-*-Windows-x64.zip" \
+            --dir ./release-artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Stop OBS
+        run: |
+          ssh resolume.lan 'taskkill /IM obs64.exe /F' 2>/dev/null || true
+          sleep 3
+
+      - name: Deploy OBS Studio
+        run: |
+          cd release-artifacts
+          ZIP_FILE=$(ls *.zip 2>/dev/null | head -1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "FAIL: No ZIP file found"
+            ls -la
+            exit 1
+          fi
+          echo "Deploying: $ZIP_FILE"
+          scp "$ZIP_FILE" 'resolume.lan:C:\Temp\obs-update.zip'
+          ssh resolume.lan 'powershell -Command "Expand-Archive -Path \"C:\Temp\obs-update.zip\" -DestinationPath \"C:\Program Files\obs-studio\" -Force"'
+          ssh resolume.lan 'del "C:\Temp\obs-update.zip"'
+
+      - name: Start OBS
+        run: |
+          ssh resolume.lan 'schtasks /Run /TN "StartOBS"'
+          echo "Waiting 15s for OBS startup..."
+          sleep 15
+
+      - name: Verify deployment
+        run: |
+          ssh resolume.lan 'tasklist /FI "IMAGENAME eq obs64.exe"' | grep -q obs64.exe \
+            || { echo "FAIL: OBS not running"; exit 1; }
+          echo "OBS is running"
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf release-artifacts/
