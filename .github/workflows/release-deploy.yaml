@@ -16,6 +16,7 @@ jobs:
       - name: Download release artifact
         run: |
           gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
             --pattern "OBS-Studio-*-Windows-x64.zip" \
             --dir ./release-artifacts
         env:
