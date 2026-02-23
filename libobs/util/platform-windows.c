@@ -386,11 +386,71 @@ void os_sleep_ms(uint32_t duration)
 	Sleep(duration);
 }
 
+/* PTP-corrected monotonic clock.
+ * DanteSync adjusts the system wall clock rate via SetSystemTimeAdjustmentPrecise,
+ * but OBS uses QueryPerformanceCounter which is a fixed hardware counter unaffected
+ * by that API. This reads the adjustment ratio and applies it incrementally to QPC
+ * so OBS timing tracks the PTP-corrected clock rate.
+ *
+ * Epoch-based approach: when the correction rate changes, we accumulate the
+ * correction from the previous epoch at the old rate and start a new epoch.
+ * This avoids time discontinuities that a simple multiply would cause. */
+static bool ptp_init = false;
+static uint64_t ptp_epoch_qpc_ns = 0;
+static int64_t ptp_accumulated_ns = 0;
+static double ptp_rate = 0.0;
+static uint64_t ptp_last_check_ns = 0;
+
+static void ptp_correction_update(uint64_t raw_ns)
+{
+	if (raw_ns - ptp_last_check_ns < 1000000000ULL)
+		return;
+	ptp_last_check_ns = raw_ns;
+
+	DWORD64 adj = 0, inc = 0;
+	BOOL disabled = TRUE;
+	if (!GetSystemTimeAdjustmentPrecise(&adj, &inc, &disabled))
+		return;
+	if (disabled || inc == 0)
+		return;
+
+	double new_rate = (double)adj / (double)inc - 1.0;
+
+	int64_t epoch_delta = (int64_t)(raw_ns - ptp_epoch_qpc_ns);
+	ptp_accumulated_ns += (int64_t)(epoch_delta * ptp_rate);
+
+	ptp_epoch_qpc_ns = raw_ns;
+	ptp_rate = new_rate;
+}
+
 uint64_t os_gettime_ns(void)
 {
 	LARGE_INTEGER current_time;
 	QueryPerformanceCounter(&current_time);
-	return util_mul_div64(current_time.QuadPart, 1000000000, get_clockfreq());
+	uint64_t raw_ns = util_mul_div64(current_time.QuadPart, 1000000000,
+					 get_clockfreq());
+
+	if (!ptp_init) {
+		ptp_epoch_qpc_ns = raw_ns;
+		ptp_last_check_ns = raw_ns;
+
+		DWORD64 adj = 0, inc = 0;
+		BOOL disabled = TRUE;
+		if (GetSystemTimeAdjustmentPrecise(&adj, &inc, &disabled) &&
+		    !disabled && inc > 0) {
+			ptp_rate = (double)adj / (double)inc - 1.0;
+		}
+		ptp_init = true;
+		return raw_ns;
+	}
+
+	ptp_correction_update(raw_ns);
+
+	int64_t epoch_delta = (int64_t)(raw_ns - ptp_epoch_qpc_ns);
+	int64_t correction =
+		ptp_accumulated_ns + (int64_t)(epoch_delta * ptp_rate);
+
+	return (uint64_t)((int64_t)raw_ns + correction);
 }
 
 /* returns [folder]\[name] on windows */
