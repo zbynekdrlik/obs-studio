@@ -395,11 +395,32 @@ void os_sleep_ms(uint32_t duration)
  * Epoch-based approach: when the correction rate changes, we accumulate the
  * correction from the previous epoch at the old rate and start a new epoch.
  * This avoids time discontinuities that a simple multiply would cause. */
+
+typedef BOOL(WINAPI *GetSystemTimeAdjustmentPrecise_t)(PDWORD64, PDWORD64,
+							PBOOL);
+
 static bool ptp_init = false;
+static GetSystemTimeAdjustmentPrecise_t ptp_get_adj = NULL;
 static uint64_t ptp_epoch_qpc_ns = 0;
 static int64_t ptp_accumulated_ns = 0;
 static double ptp_rate = 0.0;
 static uint64_t ptp_last_check_ns = 0;
+
+static bool ptp_read_rate(double *out_rate)
+{
+	if (!ptp_get_adj)
+		return false;
+
+	DWORD64 adj = 0, inc = 0;
+	BOOL disabled = TRUE;
+	if (!ptp_get_adj(&adj, &inc, &disabled))
+		return false;
+	if (disabled || inc == 0)
+		return false;
+
+	*out_rate = (double)adj / (double)inc - 1.0;
+	return true;
+}
 
 static void ptp_correction_update(uint64_t raw_ns)
 {
@@ -407,14 +428,9 @@ static void ptp_correction_update(uint64_t raw_ns)
 		return;
 	ptp_last_check_ns = raw_ns;
 
-	DWORD64 adj = 0, inc = 0;
-	BOOL disabled = TRUE;
-	if (!GetSystemTimeAdjustmentPrecise(&adj, &inc, &disabled))
+	double new_rate;
+	if (!ptp_read_rate(&new_rate))
 		return;
-	if (disabled || inc == 0)
-		return;
-
-	double new_rate = (double)adj / (double)inc - 1.0;
 
 	int64_t epoch_delta = (int64_t)(raw_ns - ptp_epoch_qpc_ns);
 	ptp_accumulated_ns += (int64_t)(epoch_delta * ptp_rate);
@@ -431,16 +447,22 @@ uint64_t os_gettime_ns(void)
 					 get_clockfreq());
 
 	if (!ptp_init) {
+		ptp_init = true;
 		ptp_epoch_qpc_ns = raw_ns;
 		ptp_last_check_ns = raw_ns;
 
-		DWORD64 adj = 0, inc = 0;
-		BOOL disabled = TRUE;
-		if (GetSystemTimeAdjustmentPrecise(&adj, &inc, &disabled) &&
-		    !disabled && inc > 0) {
-			ptp_rate = (double)adj / (double)inc - 1.0;
+		HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+		if (k32) {
+			ptp_get_adj =
+				(GetSystemTimeAdjustmentPrecise_t)GetProcAddress(
+					k32,
+					"GetSystemTimeAdjustmentPrecise");
 		}
-		ptp_init = true;
+
+		double rate;
+		if (ptp_read_rate(&rate))
+			ptp_rate = rate;
+
 		return raw_ns;
 	}
 
