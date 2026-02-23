@@ -28,11 +28,25 @@ jobs:
 
       - name: Stop OBS
         run: |
-          ssh ${{ matrix.host }} 'taskkill /IM obs64.exe /F' 2>/dev/null || true
-          sleep 3
+          HOST="${{ matrix.host }}"
+          ssh "$HOST" 'taskkill /IM obs64.exe /F' 2>/dev/null || true
+          echo "Waiting for OBS to fully exit on $HOST..."
+          for i in $(seq 1 30); do
+            if ! ssh "$HOST" 'tasklist /FI "IMAGENAME eq obs64.exe"' 2>/dev/null | grep -q obs64.exe; then
+              echo "OBS exited after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "FAIL: OBS still running after 30s on $HOST"
+              exit 1
+            fi
+            sleep 1
+          done
+          sleep 2
 
       - name: Deploy OBS Studio
         run: |
+          HOST="${{ matrix.host }}"
           cd release-artifacts
           ZIP_FILE=$(ls *.zip 2>/dev/null | head -1)
           if [ -z "$ZIP_FILE" ]; then
@@ -40,10 +54,20 @@ jobs:
             ls -la
             exit 1
           fi
-          echo "Deploying: $ZIP_FILE"
-          scp "$ZIP_FILE" '${{ matrix.host }}:C:\Temp\obs-update.zip'
-          ssh ${{ matrix.host }} 'powershell -Command "Expand-Archive -Path \"C:\Temp\obs-update.zip\" -DestinationPath \"C:\Program Files\obs-studio\" -Force"'
-          ssh ${{ matrix.host }} 'del "C:\Temp\obs-update.zip"'
+          echo "Deploying: $ZIP_FILE to $HOST"
+
+          PRE_SIZE=$(ssh "$HOST" 'powershell -Command "(Get-Item \"C:\Program Files\obs-studio\bin\64bit\obs.dll\").Length"' 2>/dev/null || echo "0")
+          echo "Pre-deploy obs.dll size: $PRE_SIZE"
+
+          scp "$ZIP_FILE" "$HOST:C:\\Temp\\obs-update.zip"
+          ssh "$HOST" 'powershell -Command "Expand-Archive -Path \"C:\Temp\obs-update.zip\" -DestinationPath \"C:\Program Files\obs-studio\" -Force"'
+          ssh "$HOST" 'del "C:\Temp\obs-update.zip"'
+
+          POST_SIZE=$(ssh "$HOST" 'powershell -Command "(Get-Item \"C:\Program Files\obs-studio\bin\64bit\obs.dll\").Length"' 2>/dev/null || echo "0")
+          echo "Post-deploy obs.dll size: $POST_SIZE"
+          if [ "$PRE_SIZE" = "$POST_SIZE" ] && [ "$POST_SIZE" != "0" ]; then
+            echo "WARNING: obs.dll size unchanged — file may not have been overwritten"
+          fi
 
       - name: Start OBS
         run: |
